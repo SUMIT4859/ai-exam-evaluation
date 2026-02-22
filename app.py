@@ -12,7 +12,7 @@ st.set_page_config(
     layout="centered"
 )
 
-st.title("📚 AI-Based Exam Evaluation System")
+st.title("📚 Exam Evaluation System")
 
 mode = st.radio(
     "Select Evaluation Mode",
@@ -132,4 +132,5 @@ if uploaded_file is not None:
 
                 # For Demo Purpose
                 with st.expander("🔍 View Detected Answer Text"):
+
                     st.write(student_answer if student_answer else "No answer detected.")
