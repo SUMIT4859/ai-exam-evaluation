@@ -1,57 +1,75 @@
-import cv2
-import numpy as np
-import pytesseract
-import re
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from answer_key import correct_answers
+# ------------------------------------------------------------
+# Import Required Libraries
+# ------------------------------------------------------------
 
-# 🔹 Set Tesseract Path (required for OCR)
+import cv2                          # For image processing
+import numpy as np                  # For numerical operations
+import pytesseract                  # For OCR (Image → Text)
+import re                           # For text cleaning & pattern matching
+from sklearn.feature_extraction.text import TfidfVectorizer  # Convert text to numbers
+from sklearn.metrics.pairwise import cosine_similarity       # Compare two texts
+from answer_key import correct_answers  # Import correct answers dictionary
 
 
+# ------------------------------------------------------------
+# 1️⃣ TEXT CLEANING FUNCTION
+# ------------------------------------------------------------
+# This function prepares text for comparison.
+# It removes unwanted characters and standardizes format.
 
-# --------------------------------------------------
-# 1️⃣ Clean Text Function
-# --------------------------------------------------
-# This removes special characters and extra spaces
-# and converts text to lowercase for better comparison
 def clean_text(text):
-    text = text.lower()
-    text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'[^a-z0-9\s]', '', text)
-    return text.strip()
+
+    text = text.lower()                          # Convert all letters to lowercase
+    text = re.sub(r'\s+', ' ', text)             # Remove extra spaces
+    text = re.sub(r'[^a-z0-9\s]', '', text)      # Remove special characters
+
+    return text.strip()                          # Remove space from start & end
 
 
-# --------------------------------------------------
-# 2️⃣ Extract Text from Image using OCR
-# --------------------------------------------------
+# ------------------------------------------------------------
+# 2️⃣ EXTRACT TEXT FROM IMAGE USING OCR
+# ------------------------------------------------------------
+# This function converts answer sheet image into text.
+
 def extract_text(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # Improve OCR clarity using thresholding
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # Convert image to grayscale
+
+    # Apply threshold to improve text clarity
     gray = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)[1]
 
+    # Use Tesseract OCR to read text from image
     return pytesseract.image_to_string(gray)
 
 
-# --------------------------------------------------
-# 3️⃣ Validate Image Contains Meaningful Text
-# --------------------------------------------------
+# ------------------------------------------------------------
+# 3️⃣ VALIDATE IF IMAGE HAS MEANINGFUL TEXT
+# ------------------------------------------------------------
+# This prevents random images (like selfies) from being evaluated.
+
 def is_valid_text(full_text):
+
     cleaned = clean_text(full_text)
-    return len(cleaned) > 20  # Minimum text length required
+
+    # If text length is small, consider image invalid
+    return len(cleaned) > 20
 
 
-# --------------------------------------------------
-# 4️⃣ Split Answers Based on Q1, Q2, Q3, Q4
-# --------------------------------------------------
+# ------------------------------------------------------------
+# 4️⃣ SPLIT FULL TEXT INTO Q1, Q2, Q3, Q4
+# ------------------------------------------------------------
+# This function separates answers based on question numbers.
+
 def split_answers(full_text):
-    answers = {}
-    full_text = full_text.lower()
 
-    question_keys = list(correct_answers.keys())
+    answers = {}                          # Store answers here
+    full_text = full_text.lower()         # Convert text to lowercase
+
+    question_keys = list(correct_answers.keys())  # ['Q1', 'Q2', 'Q3', 'Q4']
 
     for q in question_keys:
+
+        # Create pattern to extract text after Q1 until next question
         pattern = (
             q.lower() +
             r'[:\-]?\s*(.+?)(?=' +
@@ -62,66 +80,78 @@ def split_answers(full_text):
         match = re.search(pattern, full_text, re.DOTALL)
 
         if match:
-            answers[q] = match.group(1)
+            answers[q] = match.group(1)  # Extract answer text
         else:
-            answers[q] = ""
+            answers[q] = ""              # If not found, keep empty
 
     return answers
 
 
-# --------------------------------------------------
-# 5️⃣ Calculate Similarity using TF-IDF + Cosine Similarity
-# --------------------------------------------------
+# ------------------------------------------------------------
+# 5️⃣ CALCULATE SIMILARITY BETWEEN TWO TEXTS
+# ------------------------------------------------------------
+# Uses TF-IDF + Cosine Similarity
+
 def similarity_score(student_text, correct_text):
 
+    # Clean both texts
     student_text = clean_text(student_text)
     correct_text = clean_text(correct_text)
 
+    # If student answer is empty → 0%
     if len(student_text) == 0:
         return 0.0
 
+    # Convert text into numerical vectors
     vectorizer = TfidfVectorizer()
     tfidf = vectorizer.fit_transform([student_text, correct_text])
 
+    # Calculate cosine similarity between vectors
     score = cosine_similarity(tfidf[0:1], tfidf[1:2])
 
+    # Convert similarity score into percentage
     return float(score[0][0]) * 100
 
 
-# --------------------------------------------------
-# 6️⃣ Main Evaluation Function
-# --------------------------------------------------
+# ------------------------------------------------------------
+# 6️⃣ MAIN FUNCTION – COMPLETE EXAM EVALUATION
+# ------------------------------------------------------------
+# This function combines everything:
+# OCR → Validation → Split → Similarity → Marks
+
 def evaluate_exam(image):
 
-    # Step 1: Extract full text
+    # Step 1: Extract full text from image
     full_text = extract_text(image)
 
-    # Step 2: Validate image
+    # Step 2: Validate if image contains readable text
     if not is_valid_text(full_text):
         return None, 0
 
-    # Step 3: Split answers
+    # Step 3: Split answers by question number
     answers = split_answers(full_text)
 
-    # Step 4: Ensure at least one Q label exists
+    # Step 4: If no question labels found → invalid
     if all(len(ans.strip()) == 0 for ans in answers.values()):
         return None, 0
 
-    results = {}
-    total_marks = 0
+    results = {}       # Store per-question results
+    total_marks = 0    # Store total marks
 
     # Step 5: Evaluate each question
     for q, correct_text in correct_answers.items():
 
         student_answer = answers[q].strip()
 
+        # If student did not write answer
         if len(student_answer) < 5:
             similarity = 0
             marks = 0
         else:
+            # Calculate similarity percentage
             similarity = similarity_score(student_answer, correct_text)
 
-            # 🔹 Marking Scheme
+            # Assign marks based on similarity
             if similarity >= 75:
                 marks = 5
             elif similarity >= 45:
@@ -131,11 +161,14 @@ def evaluate_exam(image):
             else:
                 marks = 0
 
+        # Add marks to total
         total_marks += marks
 
+        # Store result for that question
         results[q] = {
             "similarity": similarity,
             "marks": marks
         }
 
+    # Return final result
     return results, total_marks
